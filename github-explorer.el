@@ -4,6 +4,8 @@
 
 ;; Author: Giap Tran <txgvnn@gmail.com>
 ;; URL: https://github.com/TxGVNN/github-explorer
+;; Package-Version: 20210113.1307
+;; Package-Commit: b083d0615dd88d9ec4f116015c98b5e3326f77a5
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "24.4"))
 ;; Keywords: comm
@@ -63,6 +65,8 @@
 
 (defvar github-explorer-repository)
 
+(defvar github-explorer-branch-name "")
+
 (defun github-explorer-util-package-try-get-package-url ()
   "Try and get single a package url under point.
 
@@ -90,9 +94,12 @@ From URL `https://github.com/akshaybadola/emacs-util'
                          (and (eq major-mode 'package-menu-mode)
                               (github-explorer-repo-from-url (util/package-try-get-package-url)))
                          (thing-at-point 'symbol))))
-  (setq github-explorer-repository (read-string "Repository: " repo))
+  (setq github-explorer-branch-name (if current-prefix-arg "main" "master"))
+  (setq github-explorer-repo-url nil)
+  (setq github-explorer-repository (read-string "Repository: " (string-remove-suffix ".git" repo)))
   (github-explorer--tree (format "https://api.github.com/repos/%s/git/trees/%s"
-                                 github-explorer-repository "master") "/"))
+                                 github-explorer-repository
+                                 github-explorer-branch-name) "/"))
 
 (defun github-explorer-at-point()
   "Go to path in buffer GitHub tree."
@@ -101,7 +108,6 @@ From URL `https://github.com/akshaybadola/emacs-util'
     (setq item (get-text-property (line-beginning-position) 'invisible))
     (setq url (cdr (assoc 'url item)))
     (setq path (cdr (assoc 'path item)))
-
     (setq repo (buffer-name))
     (while (string-match ":\\(.+\\)\\*" repo pos)
       (setq matches (concat (match-string 0 repo)))
@@ -116,35 +122,39 @@ From URL `https://github.com/akshaybadola/emacs-util'
         (github-explorer--tree url path)
       (github-explorer--raw repo path))))
 
+(defun github-explorer-callback (arg)
+  ;; (debug)
+  (cond
+   ((equal :error (car arg))
+    (message (format "%s" arg)))
+   (t
+    ;; (setq github-explorer-repo-url )
+    (with-current-buffer (current-buffer)
+      (let (github-explorer-object)
+        (goto-char (point-min))
+        (re-search-forward "^$")
+        (delete-region (point) (point-min))
+        (goto-char (point-min))
+        (setq github-explorer-object (json-read))
+        (with-current-buffer (get-buffer-create github-explorer-buffer-temp)
+          (read-only-mode -1)
+          (erase-buffer)
+          (github-explorer--render-object github-explorer-object)
+          (goto-char (point-min))
+          (github-explorer-mode)
+          (switch-to-buffer (current-buffer))))))))
+
 (defun github-explorer--tree (url path)
   "Get trees by URL of PATH github.
 This function will create *GitHub:REPO:* buffer"
   (setq github-explorer-buffer-temp (format "*%s:%s:%s*" github-explorer-name github-explorer-repository path))
-  (url-retrieve url
-                (lambda (arg)
-                  (cond
-                   ((equal :error (car arg))
-                    (message arg))
-                   (t
-                    (with-current-buffer (current-buffer)
-                      (let (github-explorer-object)
-                        (goto-char (point-min))
-                        (re-search-forward "^$")
-                        (delete-region (point) (point-min))
-                        (goto-char (point-min))
-                        (setq github-explorer-object (json-read))
-                        (with-current-buffer (get-buffer-create github-explorer-buffer-temp)
-                          (read-only-mode -1)
-                          (erase-buffer)
-                          (github-explorer--render-object github-explorer-object)
-                          (goto-char (point-min))
-                          (github-explorer-mode)
-                          (switch-to-buffer (current-buffer))))))))))
+  (url-retrieve url #'github-explorer-callback))
 
 (defun github-explorer--raw (repo path)
   "Get raw of PATH in REPO github."
   (let (url)
-    (setq url (format "https://raw.githubusercontent.com/%s/master%s" repo path))
+    (setq url (format "https://raw.githubusercontent.com/%s/%s%s"
+                      repo github-explorer-branch-name path))
     (setq github-explorer-buffer-temp (format "*%s:%s:%s*" github-explorer-name repo path))
     (url-retrieve url
                   (lambda (arg)
